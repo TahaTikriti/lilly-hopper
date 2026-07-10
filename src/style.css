@@ -16,7 +16,13 @@ body {
   touch-action: none;
 }
 
-/* ---- pill toggle ---- */
+/* ---- chaos meter fill: cool teal → storm violet ---- */
+.chaos-fill {
+  background: linear-gradient(90deg, #4fd8c4 0%, #58a8d8 45%, #8a6cf0 80%, #c45cd8 100%);
+  transition: width 0.2s ease-out;
+}
+
+/* ---- pill toggle (sound) ---- */
 .toggle {
   position: relative;
   width: 38px;
@@ -46,38 +52,4 @@ body {
 }
 .toggle[aria-pressed="true"]::after {
   transform: translateX(17px);
-}
-
-/* ---- sliders ---- */
-.slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  outline: none;
-  cursor: pointer;
-}
-.slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 15px;
-  height: 15px;
-  border-radius: 999px;
-  background: #f2c184;
-  border: 2px solid rgba(30, 20, 50, 0.55);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
-  transition: transform 0.15s ease;
-}
-.slider::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-}
-.slider::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  border-radius: 999px;
-  background: #f2c184;
-  border: 2px solid rgba(30, 20, 50, 0.55);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
 }

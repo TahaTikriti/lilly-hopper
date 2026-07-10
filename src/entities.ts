@@ -12,7 +12,7 @@ function rand(a: number, b: number): number {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Lily pad — floats on the height field: bobs, tilts and drifts     */
+/*  Lily pad — floats on the height field; chaos makes it restless    */
 /* ------------------------------------------------------------------ */
 
 export class LilyPad {
@@ -21,8 +21,9 @@ export class LilyPad {
   readonly ny: number;
   private readonly nr: number;
   r = 0;
-  private readonly notch: number; // angle of the leaf's split
+  private notch: number; // angle of the leaf's split
   private readonly veins: number;
+  private readonly seed = rand(0, 100);
   private home: Vec = { x: 0, y: 0 };
   pos: Vec = { x: 0, y: 0 };
   private vel: Vec = { x: 0, y: 0 };
@@ -47,23 +48,39 @@ export class LilyPad {
     this.vel = { x: 0, y: 0 };
   }
 
-  update(dt: number, field: WaveField, toCell: number): void {
+  update(
+    dt: number,
+    t: number,
+    field: WaveField,
+    toCell: number,
+    chaos: number,
+    wind: Vec,
+  ): void {
     const cx = this.pos.x * toCell;
     const cy = this.pos.y * toCell;
-    const h = field.sample(cx, cy);
+    const hgt = field.sample(cx, cy);
     const { gx, gy } = field.gradient(cx, cy);
 
     // vertical bob and visual tilt follow the local surface
-    this.bob += (h * 7 - this.bob) * Math.min(1, dt * 10);
+    this.bob += (hgt * 7 - this.bob) * Math.min(1, dt * 10);
     this.tiltX += (gx - this.tiltX) * Math.min(1, dt * 8);
     this.tiltY += (gy - this.tiltY) * Math.min(1, dt * 8);
 
-    // waves push the pad downhill; a soft spring pulls it home
+    // chaos makes the pad wander around home and spin its notch —
+    // the real difficulty curve: targets drift faster as combo climbs
+    const wob = 46 * chaos;
+    const wx = this.home.x + Math.sin(t * (0.5 + chaos * 0.7) + this.seed * 2.1) * wob;
+    const wy = this.home.y + Math.cos(t * (0.41 + chaos * 0.6) + this.seed * 3.7) * wob;
+    this.notch += Math.sin(t * 0.8 + this.seed) * chaos * 1.1 * dt;
+
+    // waves push it downhill, wind shoves it, a spring pulls it to the
+    // (wandering) anchor point
     const PUSH = 300;
     const SPRING = 2.6;
     const DRAG = 2.0;
-    this.vel.x += (-gx * PUSH - (this.pos.x - this.home.x) * SPRING - this.vel.x * DRAG) * dt;
-    this.vel.y += (-gy * PUSH - (this.pos.y - this.home.y) * SPRING - this.vel.y * DRAG) * dt;
+    const gust = 26 * chaos * chaos;
+    this.vel.x += (-gx * PUSH + wind.x * gust - (this.pos.x - wx) * SPRING - this.vel.x * DRAG) * dt;
+    this.vel.y += (-gy * PUSH + wind.y * gust - (this.pos.y - wy) * SPRING - this.vel.y * DRAG) * dt;
     this.pos.x += this.vel.x * dt;
     this.pos.y += this.vel.y * dt;
   }
@@ -121,7 +138,7 @@ export class LilyPad {
       ctx.stroke();
     }
 
-    // warm rim light from the sunset, upper-left arc
+    // warm rim light, upper-left arc
     ctx.strokeStyle = "rgba(242, 193, 132, 0.4)";
     ctx.lineWidth = 1.6;
     ctx.beginPath();
@@ -130,10 +147,24 @@ export class LilyPad {
 
     ctx.restore();
   }
+
+  /** Soft colour blob into the low-res reflection map (grid coords). */
+  drawReflection(rctx: CanvasRenderingContext2D, toCell: number): void {
+    const x = this.pos.x * toCell;
+    const y = this.pos.y * toCell;
+    const r = this.r * toCell * 1.35;
+    const g = rctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+    g.addColorStop(0, "rgba(86, 148, 92, 0.85)");
+    g.addColorStop(1, "rgba(86, 148, 92, 0)");
+    rctx.fillStyle = g;
+    rctx.beginPath();
+    rctx.arc(x, y, r, 0, TAU);
+    rctx.fill();
+  }
 }
 
 /* ------------------------------------------------------------------ */
-/*  Frog — parabolic hops with squash & stretch                       */
+/*  Frog — beat-locked parabolic hops with squash & stretch           */
 /* ------------------------------------------------------------------ */
 
 type FrogState = "idle" | "crouch" | "air" | "land";
@@ -143,13 +174,16 @@ export interface JumpEvents {
   onLand(pos: Vec, power: number): void;
 }
 
+/** crouch + flight = exactly one beat, so a click on the pulse lands on it */
+export const CROUCH_TIME = 0.12;
+
 export class Frog {
   padIndex: number;
   pos: Vec = { x: 0, y: 0 };
   private heading = -Math.PI / 2;
   private state: FrogState = "idle";
   private t = 0;
-  private airDur = 0;
+  private airDur = 0.48;
   private from: Vec = { x: 0, y: 0 };
   private targetPad = 0;
   private apex = 0;
@@ -164,27 +198,28 @@ export class Frog {
 
   readonly size = 15;
 
-  constructor(padIndex: number) {
+  constructor(padIndex: number, beatDur: number) {
     this.padIndex = padIndex;
+    this.airDur = Math.max(0.3, beatDur - CROUCH_TIME);
   }
 
   get busy(): boolean {
     return this.state !== "idle";
   }
 
-  jumpTo(padIndex: number, pads: LilyPad[]): void {
+  jumpTo(padIndex: number, pads: LilyPad[]): boolean {
     // landing recovery may be interrupted by the next hop; flight may not
-    if (this.state === "crouch" || this.state === "air") return;
+    if (this.state === "crouch" || this.state === "air") return false;
     this.targetPad = padIndex;
     this.from = { ...this.pos };
     const to = pads[padIndex].pos;
     const dist = Math.hypot(to.x - this.from.x, to.y - this.from.y);
     this.heading = dist > 4 ? Math.atan2(to.y - this.from.y, to.x - this.from.x) : this.heading;
-    this.airDur = 0.42 + Math.min(0.55, dist * 0.0011);
     this.apex = 36 + dist * 0.24;
     this.power = 0.45 + Math.min(1.25, dist / 250);
     this.state = "crouch";
     this.t = 0;
+    return true;
   }
 
   update(dt: number, pads: LilyPad[], ev: JumpEvents): void {
@@ -213,7 +248,7 @@ export class Frog {
         this.t += dt;
         const pad = pads[this.padIndex];
         this.pos = { x: pad.pos.x, y: pad.pos.y - pad.bob * 0.6 };
-        if (this.t >= 0.13) {
+        if (this.t >= CROUCH_TIME) {
           this.state = "air";
           this.t = 0;
           ev.onTakeoff(this.pos, this.power * 0.35);
@@ -274,7 +309,7 @@ export class Frog {
     let along = 1 + 0.02 * Math.sin(this.breathe * 2.1);
     let perp = 1 - 0.02 * Math.sin(this.breathe * 2.1);
     if (this.state === "crouch") {
-      const k = Math.min(1, this.t / 0.13);
+      const k = Math.min(1, this.t / CROUCH_TIME);
       along = 1 - 0.22 * k;
       perp = 1 + 0.16 * k;
     } else if (this.state === "air") {
@@ -286,7 +321,8 @@ export class Frog {
     along -= this.squash;
     perp += this.squash * 0.8;
 
-    const lift = 1 + this.altitude * 0.011; // closer to camera when airborne
+    // closer to camera when airborne, capped so long hops stay frog-sized
+    const lift = 1 + Math.min(this.altitude, 55) * 0.009;
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y - this.altitude);
@@ -373,192 +409,17 @@ export class Frog {
 
     ctx.restore();
   }
-}
 
-/* ------------------------------------------------------------------ */
-/*  Dragonfly — wanders above the surface, occasionally dips its tail */
-/* ------------------------------------------------------------------ */
-
-type Ripple = (x: number, y: number, radiusPx: number, amp: number) => void;
-
-export class Dragonfly {
-  private pos: Vec;
-  private vel: Vec = { x: 0, y: 0 };
-  private readonly seed = rand(0, 100);
-  private t = rand(0, 100);
-  private hoverH = 16;
-  private dipIn = rand(4, 10);
-  private dip = -1; // <0: not dipping; else 0..1 phase
-  private dipped = false;
-
-  constructor(W: number, H: number) {
-    this.pos = { x: rand(0.2, 0.8) * W, y: rand(0.2, 0.8) * H };
-  }
-
-  update(dt: number, W: number, H: number, ripple: Ripple): void {
-    this.t += dt;
-
-    // meandering steering from layered sines
-    const a =
-      Math.sin(this.t * 0.31 + this.seed) * 1.8 +
-      Math.sin(this.t * 0.117 + this.seed * 2.7) * 2.6;
-    const speed = this.dip >= 0 ? 14 : 34 + 18 * Math.sin(this.t * 0.21 + this.seed);
-    let ax = Math.cos(a) * speed - this.vel.x;
-    let ay = Math.sin(a) * speed - this.vel.y;
-    // steer back toward the pond when near an edge
-    const M = 70;
-    if (this.pos.x < M) ax += 40;
-    if (this.pos.x > W - M) ax -= 40;
-    if (this.pos.y < M) ay += 40;
-    if (this.pos.y > H - M) ay -= 40;
-    this.vel.x += ax * dt * 1.6;
-    this.vel.y += ay * dt * 1.6;
-    this.pos.x += this.vel.x * dt;
-    this.pos.y += this.vel.y * dt;
-
-    // occasional tail-dip that pricks the water
-    this.dipIn -= dt;
-    if (this.dipIn <= 0 && this.dip < 0) {
-      this.dip = 0;
-      this.dipped = false;
-      this.dipIn = rand(6, 14);
-    }
-    if (this.dip >= 0) {
-      this.dip += dt / 1.4;
-      const k = Math.sin(Math.min(1, this.dip) * Math.PI);
-      this.hoverH = 16 - 14 * k;
-      if (k > 0.96 && !this.dipped) {
-        this.dipped = true;
-        ripple(this.pos.x, this.pos.y, 4, 0.07);
-      }
-      if (this.dip >= 1) {
-        this.dip = -1;
-        this.hoverH = 16;
-      }
-    }
-  }
-
-  draw(ctx: CanvasRenderingContext2D): void {
-    const { x, y } = this.pos;
-    const ang = Math.atan2(this.vel.y, this.vel.x);
-
-    // shadow-dot on the water
-    ctx.fillStyle = `rgba(8, 20, 28, ${0.18 * (1 - this.hoverH / 40)})`;
-    ctx.beginPath();
-    ctx.ellipse(x + 4, y + 6 + this.hoverH * 0.4, 5, 2.5, 0, 0, TAU);
-    ctx.fill();
-
-    ctx.save();
-    ctx.translate(x, y - this.hoverH);
-    ctx.rotate(ang);
-
-    // wings — fluttering translucency
-    const flut = 0.14 + 0.14 * Math.abs(Math.sin(this.t * 68 + this.seed));
-    ctx.fillStyle = `rgba(212, 232, 240, ${flut})`;
-    for (const side of [-1, 1]) {
-      ctx.beginPath();
-      ctx.ellipse(2, side * 6, 9, 2.6, side * 0.5, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(-2, side * 6, 8, 2.3, side * 0.75, 0, TAU);
-      ctx.fill();
-    }
-
-    // slender body
-    ctx.strokeStyle = "#b4543c";
-    ctx.lineWidth = 2.1;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(5, 0);
-    ctx.lineTo(-12, 0);
-    ctx.stroke();
-    ctx.fillStyle = "#8e3c2c";
-    ctx.beginPath();
-    ctx.arc(6, 0, 2.6, 0, TAU);
-    ctx.fill();
-
-    ctx.restore();
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Fish — a dark shape gliding beneath, nudging the surface          */
-/* ------------------------------------------------------------------ */
-
-export class Fish {
-  private t = 0;
-  private readonly dur: number;
-  private readonly p0: Vec;
-  private readonly p1: Vec;
-  private readonly cp: Vec;
-  private rippleIn = 0.3;
-  done = false;
-
-  constructor(W: number, H: number) {
-    const side = Math.floor(rand(0, 4));
-    const edge = (s: number): Vec => {
-      if (s === 0) return { x: rand(0.15, 0.85) * W, y: 0.12 * H };
-      if (s === 1) return { x: rand(0.15, 0.85) * W, y: 0.88 * H };
-      if (s === 2) return { x: 0.1 * W, y: rand(0.2, 0.8) * H };
-      return { x: 0.9 * W, y: rand(0.2, 0.8) * H };
-    };
-    this.p0 = edge(side);
-    this.p1 = edge((side + 2) % 4);
-    const mx = (this.p0.x + this.p1.x) / 2;
-    const my = (this.p0.y + this.p1.y) / 2;
-    const dx = this.p1.x - this.p0.x;
-    const dy = this.p1.y - this.p0.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const bend = rand(-0.35, 0.35) * len;
-    this.cp = { x: mx - (dy / len) * bend, y: my + (dx / len) * bend };
-    this.dur = rand(4.5, 7);
-  }
-
-  private at(k: number): Vec {
-    const m = 1 - k;
-    return {
-      x: m * m * this.p0.x + 2 * m * k * this.cp.x + k * k * this.p1.x,
-      y: m * m * this.p0.y + 2 * m * k * this.cp.y + k * k * this.p1.y,
-    };
-  }
-
-  update(dt: number, ripple: Ripple, plip: (vol: number, pitch: number) => void): void {
-    this.t += dt / this.dur;
-    if (this.t >= 1 && !this.done) {
-      // departing tail-flick breaks the surface
-      const p = this.at(1);
-      ripple(p.x, p.y, 9, 0.5);
-      plip(0.45, 1.35);
-      this.done = true;
-      return;
-    }
-    this.rippleIn -= dt;
-    if (this.rippleIn <= 0) {
-      this.rippleIn = 0.42;
-      const p = this.at(this.t);
-      ripple(p.x, p.y, 7, 0.11); // the moving bulge of water above its back
-    }
-  }
-
-  draw(ctx: CanvasRenderingContext2D): void {
-    if (this.done) return;
-    const k = Math.min(1, this.t);
-    const p = this.at(k);
-    const ahead = this.at(Math.min(1, k + 0.02));
-    const ang = Math.atan2(ahead.y - p.y, ahead.x - p.x);
-    const alpha = 0.26 * Math.pow(Math.sin(Math.PI * k), 0.6);
-    const wig = Math.sin(this.t * this.dur * 7) * 3;
-
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(ang);
-    ctx.fillStyle = `rgba(12, 30, 38, ${alpha})`;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 20, 7, 0, 0, TAU);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(-19, wig, 8, 4.4, wig * 0.04, 0, TAU);
-    ctx.fill();
-    ctx.restore();
+  drawReflection(rctx: CanvasRenderingContext2D, toCell: number): void {
+    const x = this.pos.x * toCell;
+    const y = this.pos.y * toCell;
+    const r = this.size * toCell * 1.6;
+    const g = rctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+    g.addColorStop(0, "rgba(126, 176, 96, 0.8)");
+    g.addColorStop(1, "rgba(126, 176, 96, 0)");
+    rctx.fillStyle = g;
+    rctx.beginPath();
+    rctx.arc(x, y, r, 0, TAU);
+    rctx.fill();
   }
 }

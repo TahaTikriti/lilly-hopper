@@ -1,12 +1,14 @@
 import "./style.css";
 import { WaveField } from "./waves";
 import { WaterRenderer } from "./water";
-import { LilyPad, Frog, Dragonfly, Fish } from "./entities";
-import { SoundScape } from "./audio";
+import { LilyPad, Frog } from "./entities";
+import { Music } from "./audio";
+import { Game, BEAT, type Judgment } from "./game";
 
 const canvas = document.getElementById("pond") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
-const sound = new SoundScape();
+const music = new Music();
+const game = new Game(() => music.time());
 
 /* ------------------------------------------------------------------ */
 /*  world state                                                       */
@@ -19,27 +21,51 @@ let water: WaterRenderer;
 let toCell = 1; // px → grid cells
 let pads: LilyPad[] = [];
 let frog: Frog;
-let flies: Dragonfly[] = [];
-let fish: Fish | null = null;
-let fishIn = 6;
-let rain = false;
-let intensity = 1;
+
+// reflection map: pads + frog rendered at grid resolution each frame
+let reflCanvas: HTMLCanvasElement;
+let rctx: CanvasRenderingContext2D;
+
+interface RainDrop {
+  x: number;
+  y: number;
+  t: number;
+  dur: number;
+  sx: number; // slant (whence the streak falls), wind-driven
+  sy: number;
+}
+let rain: RainDrop[] = [];
+
+interface FloatText {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  t: number;
+}
+let texts: FloatText[] = [];
+
+let windA = 0.9; // wind direction, drifts over time
+let wind = { x: 0, y: 0 }; // direction · strength (0..1)
+let worldT = 0;
 
 const rand = (a: number, b: number): number => a + Math.random() * (b - a);
 
-/** Inject a ripple, in pixel coordinates. Everything funnels through here. */
+/** Inject a ripple in pixel coords; chaos livens every splash. */
 function dropAt(x: number, y: number, radiusPx: number, amp: number): void {
-  field.drop(x * toCell, y * toCell, radiusPx * toCell, amp * intensity);
+  field.drop(x * toCell, y * toCell, radiusPx * toCell, amp * (1 + game.chaos * 0.35));
 }
 
 function buildWater(): void {
   // ~4.5 css px per cell, capped so huge monitors stay fast
   const cell = Math.max(4, Math.max(W, H) / 380);
   toCell = 1 / cell;
-  const damping = field?.damping;
   field = new WaveField(Math.ceil(W / cell), Math.ceil(H / cell));
-  if (damping !== undefined) field.damping = damping;
   water = new WaterRenderer(field);
+  reflCanvas = document.createElement("canvas");
+  reflCanvas.width = field.w;
+  reflCanvas.height = field.h;
+  rctx = reflCanvas.getContext("2d", { willReadFrequently: true })!;
 }
 
 function makePads(): LilyPad[] {
@@ -73,6 +99,8 @@ function init(): void {
 
   buildWater();
   pads = makePads();
+  rain = [];
+  texts = [];
 
   // frog starts on the pad nearest the pond's centre
   let start = 0;
@@ -84,11 +112,69 @@ function init(): void {
       start = i;
     }
   });
-  frog = new Frog(start);
-  flies = [new Dragonfly(W, H), new Dragonfly(W, H)];
-  fish = null;
-  fishIn = rand(5, 10);
+  frog = new Frog(start, BEAT);
 }
+
+/* ------------------------------------------------------------------ */
+/*  judgment + feedback                                               */
+/* ------------------------------------------------------------------ */
+
+const glowEl = document.getElementById("glow") as HTMLDivElement;
+const hudScore = document.getElementById("hudScore")!;
+const hudHigh = document.getElementById("hudHigh")!;
+const hudCombo = document.getElementById("hudCombo")!;
+const hudMult = document.getElementById("hudMult")!;
+const hudChaos = document.getElementById("hudChaos") as HTMLDivElement;
+const hudChaosPct = document.getElementById("hudChaosPct")!;
+
+const TIER_GLOW = [
+  "rgba(0,0,0,0)",
+  "rgba(79,216,196,0.30)",
+  "rgba(88,168,216,0.34)",
+  "rgba(242,193,132,0.36)",
+  "rgba(138,108,240,0.40)",
+  "rgba(196,92,216,0.46)",
+];
+
+function setGlow(tier: number, flash = false): void {
+  const c = TIER_GLOW[Math.min(tier, TIER_GLOW.length - 1)];
+  const size = flash ? 220 : 150;
+  glowEl.style.boxShadow = tier > 0 ? `inset 0 0 ${size}px 24px ${c}` : "none";
+  if (flash) {
+    window.setTimeout(() => setGlow(tier), 160);
+  }
+}
+
+const JUDGE_STYLE: Record<Judgment, { text: string; color: string }> = {
+  perfect: { text: "PERFECT", color: "#ffd98a" },
+  good: { text: "GOOD", color: "#7fe0cf" },
+  miss: { text: "MISS", color: "#b8a8d8" },
+};
+
+function judgeLanding(pos: { x: number; y: number }, power: number): void {
+  dropAt(pos.x, pos.y, 12, power * 0.85);
+  if (!music.started) return; // pre-audio warm-up hops are free play
+
+  const res = game.judge(music.time());
+  const style = JUDGE_STYLE[res.judgment];
+  const label =
+    res.judgment === "miss" ? style.text : res.combo > 1 ? `${style.text} ×${res.combo}` : style.text;
+  texts.push({ x: pos.x, y: pos.y - 34, text: label, color: style.color, t: 0 });
+
+  music.land(res.judgment, res.tier);
+  if (res.judgment === "miss") music.miss();
+  music.setTier(res.tier);
+  setGlow(res.tier, res.judgment === "perfect");
+}
+
+const jumpEvents = {
+  onTakeoff(pos: { x: number; y: number }, power: number) {
+    dropAt(pos.x, pos.y, 8, power);
+  },
+  onLand(pos: { x: number; y: number }, power: number) {
+    judgeLanding(pos, power);
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /*  input                                                             */
@@ -102,25 +188,20 @@ function padAt(x: number, y: number): number {
   return -1;
 }
 
-const jumpEvents = {
-  onTakeoff(pos: { x: number; y: number }, power: number) {
-    dropAt(pos.x, pos.y, 8, power);
-    sound.plip(0.3, 1.25);
-  },
-  onLand(pos: { x: number; y: number }, power: number) {
-    dropAt(pos.x, pos.y, 12, power * 0.85);
-    sound.splash(Math.min(1, power * 0.7));
-  },
-};
+function startAudio(): void {
+  const wasStarted = music.started;
+  const anchor = music.start();
+  if (!wasStarted) game.rebase(anchor);
+}
 
 canvas.addEventListener("pointerdown", (e) => {
-  sound.ensure();
+  startAudio();
   const hit = padAt(e.clientX, e.clientY);
   if (hit >= 0) {
-    frog.jumpTo(hit, pads); // hitting the frog's own pad = a hop in place
+    if (frog.jumpTo(hit, pads)) music.jump(game.combo > 0 ? Math.min(5, game.mult - 1) : 0);
   } else {
     dropAt(e.clientX, e.clientY, 10, 0.8);
-    sound.plip(0.55, rand(0.9, 1.15));
+    music.land("good", 0); // free splash, no judgment
   }
 });
 
@@ -143,7 +224,7 @@ window.addEventListener("keydown", (e) => {
   const dir = DIRS[e.key];
   if (!dir) return;
   e.preventDefault();
-  sound.ensure();
+  startAudio();
   const from = pads[frog.padIndex].pos;
   let pick = -1;
   let best = Infinity;
@@ -157,7 +238,17 @@ window.addEventListener("keydown", (e) => {
       pick = i;
     }
   });
-  if (pick >= 0) frog.jumpTo(pick, pads);
+  if (pick >= 0 && frog.jumpTo(pick, pads)) {
+    music.jump(game.combo > 0 ? Math.min(5, game.mult - 1) : 0);
+  }
+});
+
+const soundBtn = document.getElementById("soundBtn") as HTMLButtonElement;
+soundBtn.addEventListener("click", () => {
+  const on = soundBtn.getAttribute("aria-pressed") !== "true";
+  soundBtn.setAttribute("aria-pressed", String(on));
+  startAudio();
+  music.setEnabled(on);
 });
 
 let resizeTimer = 0;
@@ -167,94 +258,138 @@ window.addEventListener("resize", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  control panel                                                     */
+/*  weather — rain and wind scale with chaos                          */
 /* ------------------------------------------------------------------ */
 
-const rainBtn = document.getElementById("rainBtn") as HTMLButtonElement;
-const soundBtn = document.getElementById("soundBtn") as HTMLButtonElement;
-const dampSlider = document.getElementById("dampSlider") as HTMLInputElement;
-const powerSlider = document.getElementById("powerSlider") as HTMLInputElement;
-const resetBtn = document.getElementById("resetBtn") as HTMLButtonElement;
+let rainCarry = 0;
 
-rainBtn.addEventListener("click", () => {
-  rain = !rain;
-  rainBtn.setAttribute("aria-pressed", String(rain));
-  sound.ensure();
-});
+function weather(dt: number): void {
+  const chaos = game.chaos;
 
-soundBtn.addEventListener("click", () => {
-  const on = soundBtn.getAttribute("aria-pressed") !== "true";
-  soundBtn.setAttribute("aria-pressed", String(on));
-  sound.ensure();
-  sound.setEnabled(on);
-});
+  // wind: direction wanders, strength follows chaos
+  windA += (Math.sin(worldT * 0.11) * 0.35 + 0.12) * dt;
+  wind.x = Math.cos(windA) * chaos;
+  wind.y = Math.sin(windA) * chaos;
 
-function applyDamping(): void {
-  field.damping = 0.986 + (Number(dampSlider.value) / 100) * 0.0137;
-}
-function applyPower(): void {
-  intensity = 0.3 + (Number(powerSlider.value) / 100) * 1.4;
-}
-dampSlider.addEventListener("input", applyDamping);
-powerSlider.addEventListener("input", applyPower);
-
-resetBtn.addEventListener("click", () => {
-  field.clear();
-  pads.forEach((p) => p.layout(W, H));
-  fish = null;
-});
-
-/* ------------------------------------------------------------------ */
-/*  ambient life                                                      */
-/* ------------------------------------------------------------------ */
-
-function ambient(dt: number): void {
-  // wind: tiny pinpricks that keep the surface from ever going glassy
-  if (Math.random() < dt * 9) {
-    dropAt(rand(0, W), rand(0, H), 6, 0.012);
+  // micro-ripples: glassy when calm, constantly pricked when stormy
+  const microRate = 3 + chaos * 42;
+  if (Math.random() < dt * microRate) {
+    dropAt(rand(0, W), rand(0, H), 6, 0.008 + 0.02 * chaos);
   }
 
-  // rain
-  if (rain) {
-    let n = dt * 15;
-    while (n > 0) {
-      if (Math.random() < n) dropAt(rand(0, W), rand(0, H), 5, rand(0.05, 0.16));
-      n -= 1;
+  // rain: density rises steeply with chaos; trajectories lean with the wind
+  const rate = chaos < 0.04 ? 0 : chaos * chaos * 95;
+  rainCarry += rate * dt;
+  while (rainCarry >= 1) {
+    rainCarry -= 1;
+    const slantLen = 34 + 60 * chaos;
+    rain.push({
+      x: rand(0, W),
+      y: rand(0, H),
+      t: 0,
+      dur: rand(0.16, 0.26),
+      sx: (wind.x * 2.2 + 0.3) * slantLen,
+      sy: (wind.y * 2.2 - 1) * slantLen,
+    });
+  }
+  for (let i = rain.length - 1; i >= 0; i--) {
+    const d = rain[i];
+    d.t += dt;
+    if (d.t >= d.dur) {
+      dropAt(d.x, d.y, 5, rand(0.05, 0.16));
+      rain.splice(i, 1);
     }
   }
-
-  // fish
-  if (fish) {
-    fish.update(dt, dropAt, (v, p) => sound.plip(v, p));
-    if (fish.done) {
-      fish = null;
-      fishIn = rand(9, 18);
-    }
-  } else {
-    fishIn -= dt;
-    if (fishIn <= 0) fish = new Fish(W, H);
-  }
-
-  for (const fly of flies) fly.update(dt, W, H, dropAt);
 }
 
 /* ------------------------------------------------------------------ */
 /*  render                                                            */
 /* ------------------------------------------------------------------ */
 
+function drawBeatRing(): void {
+  const p = game.phase();
+  const cx = W / 2;
+  const cy = H / 2;
+  const chaos = game.chaos;
+  const r = 16 + p * 52;
+  const a = (1 - p) * (0.22 + chaos * 0.12);
+  ctx.strokeStyle = `rgba(${Math.round(255 - chaos * 90)}, ${Math.round(226 - chaos * 60)}, ${Math.round(
+    190 + chaos * 50,
+  )}, ${a})`;
+  ctx.lineWidth = 2 + (1 - p) * 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  // bright pulse right on the beat
+  if (p < 0.1) {
+    ctx.fillStyle = `rgba(255, 240, 210, ${(0.1 - p) * 1.6})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawTexts(dt: number): void {
+  ctx.textAlign = "center";
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const ft = texts[i];
+    ft.t += dt;
+    const k = ft.t / 0.95;
+    if (k >= 1) {
+      texts.splice(i, 1);
+      continue;
+    }
+    const pop = k < 0.18 ? 0.7 + (k / 0.18) * 0.45 : 1.15 - (k - 0.18) * 0.12;
+    const alpha = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
+    ctx.save();
+    ctx.translate(ft.x, ft.y - k * 30);
+    ctx.scale(pop, pop);
+    ctx.font = "italic 700 24px Fraunces, Georgia, serif";
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = ft.color;
+    ctx.shadowColor = "rgba(10,10,30,0.7)";
+    ctx.shadowBlur = 10;
+    ctx.fillText(ft.text, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
 let vignette: CanvasGradient | null = null;
 let vignetteKey = "";
 
-function render(): void {
-  water.render(ctx, W, H);
+function render(dt: number): void {
+  // reflection map for this frame
+  rctx.clearRect(0, 0, field.w, field.h);
+  for (const pad of pads) pad.drawReflection(rctx, toCell);
+  frog.drawReflection(rctx, toCell);
+  const refl = rctx.getImageData(0, 0, field.w, field.h).data;
 
-  if (fish) fish.draw(ctx);
+  water.render(ctx, W, H, game.chaos, dt, wind, refl);
+
+  drawBeatRing();
   for (const pad of pads) pad.draw(ctx);
   frog.drawShadow(ctx);
   frog.draw(ctx);
-  for (const fly of flies) fly.draw(ctx);
 
-  // dusk vignette + a whisper of sunset glow across the top
+  // rain streaks fall in front of everything
+  if (rain.length > 0) {
+    ctx.strokeStyle = "rgba(205, 228, 246, 0.5)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (const d of rain) {
+      const k = d.t / d.dur;
+      const x1 = d.x - d.sx * (1 - k);
+      const y1 = d.y - d.sy * (1 - k);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 + d.sx * 0.3, y1 + d.sy * 0.3);
+    }
+    ctx.stroke();
+  }
+
+  drawTexts(dt);
+
+  // dusk vignette deepens with the storm
   const key = `${W}x${H}`;
   if (key !== vignetteKey) {
     vignette = ctx.createRadialGradient(
@@ -265,18 +400,53 @@ function render(): void {
       H * 0.5,
       Math.hypot(W, H) * 0.62,
     );
-    vignette.addColorStop(0, "rgba(18, 12, 34, 0)");
-    vignette.addColorStop(1, "rgba(18, 12, 34, 0.42)");
+    vignette.addColorStop(0, "rgba(16, 12, 34, 0)");
+    vignette.addColorStop(1, "rgba(16, 12, 34, 0.5)");
     vignetteKey = key;
   }
+  ctx.globalAlpha = 0.82 + game.chaos * 0.36;
   ctx.fillStyle = vignette!;
   ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  if (game.chaos > 0.02) {
+    ctx.fillStyle = `rgba(66, 56, 128, ${game.chaos * 0.07})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
 
-  const glow = ctx.createLinearGradient(0, 0, 0, H * 0.35);
-  glow.addColorStop(0, "rgba(255, 178, 118, 0.1)");
-  glow.addColorStop(1, "rgba(255, 178, 118, 0)");
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, W, H * 0.35);
+/* ------------------------------------------------------------------ */
+/*  HUD                                                               */
+/* ------------------------------------------------------------------ */
+
+let lastScore = -1;
+let lastHigh = -1;
+let lastCombo = -1;
+let lastMult = -1;
+let lastChaosPct = -1;
+
+function updateHud(): void {
+  if (game.score !== lastScore) {
+    lastScore = game.score;
+    hudScore.textContent = String(game.score);
+  }
+  if (game.high !== lastHigh) {
+    lastHigh = game.high;
+    hudHigh.textContent = String(game.high);
+  }
+  if (game.combo !== lastCombo) {
+    lastCombo = game.combo;
+    hudCombo.textContent = String(game.combo);
+  }
+  if (game.mult !== lastMult) {
+    lastMult = game.mult;
+    hudMult.textContent = `×${game.mult}`;
+  }
+  const pct = Math.round(game.chaos * 100);
+  if (pct !== lastChaosPct) {
+    lastChaosPct = pct;
+    hudChaos.style.width = `${pct}%`;
+    hudChaosPct.textContent = `${pct}%`;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,6 +460,13 @@ let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  worldT += dt;
+
+  game.update(dt);
+  const chaos = game.chaos;
+  field.damping = 0.9945 + chaos * 0.003;
+  field.c2 = 0.28 + chaos * 0.14;
+  music.setChaos(chaos);
 
   acc += dt;
   let steps = 0;
@@ -300,15 +477,15 @@ function frame(now: number): void {
   }
   if (steps === 4) acc = 0; // dropped frames: don't spiral
 
-  ambient(dt);
-  for (const pad of pads) pad.update(dt, field, toCell);
+  weather(dt);
+  for (const pad of pads) pad.update(dt, worldT, field, toCell, chaos, wind);
   frog.update(dt, pads, jumpEvents);
 
-  render();
+  render(dt);
+  updateHud();
   requestAnimationFrame(frame);
 }
 
 init();
-applyDamping();
-applyPower();
+setGlow(0);
 requestAnimationFrame(frame);

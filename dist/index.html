@@ -7,65 +7,70 @@
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐸</text></svg>"
     />
-    <title>Lily Hopper — a pond at dusk</title>
-    <script type="module" crossorigin src="/assets/index-Ca-8Dm_p.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DdgWEQLg.css">
+    <title>Lily Hopper — rhythm chaos</title>
+    <script type="module" crossorigin src="/assets/index-UCer6EH8.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-lyu6V_OG.css">
   </head>
-  <body class="overflow-hidden bg-[#141026]">
+  <body class="overflow-hidden bg-[#101226]">
     <canvas id="pond" class="fixed inset-0 h-full w-full"></canvas>
+
+    <!-- combo-tier screen-edge glow -->
+    <div id="glow" class="pointer-events-none fixed inset-0 transition-[box-shadow,opacity] duration-700"></div>
 
     <header class="pointer-events-none fixed left-6 top-5 select-none">
       <h1
-        class="font-display text-4xl italic font-semibold text-amber-50/95 [text-shadow:0_2px_18px_rgba(20,10,40,0.55)]"
+        class="font-display text-3xl italic font-semibold text-amber-50/95 [text-shadow:0_2px_18px_rgba(10,10,30,0.6)]"
       >
         Lily Hopper
       </h1>
-      <p class="mt-1 max-w-xs text-[13px] leading-snug tracking-wide text-amber-100/65">
-        click a lily pad to hop — or tap the open water and watch the ripples
-        cross
+      <p class="mt-0.5 text-[12px] tracking-[0.22em] uppercase text-amber-100/55">rhythm chaos</p>
+      <p class="mt-3 max-w-[240px] text-[13px] leading-snug tracking-wide text-amber-100/60">
+        hop pad to pad — <span class="text-amber-50/90">land on the pulse</span>.
+        on-beat landings build your combo and stir the storm; one slip and the
+        pond exhales back to glass.
       </p>
     </header>
 
+    <!-- score / combo / chaos HUD -->
     <aside
-      class="fixed bottom-5 left-5 w-60 select-none space-y-3.5 rounded-2xl border border-white/15 bg-[#1a1430]/40 p-4 text-amber-50 shadow-2xl shadow-black/30 backdrop-blur-md"
+      class="pointer-events-none fixed right-5 top-5 w-56 select-none space-y-3 rounded-2xl border border-white/12 bg-[#141228]/45 p-4 text-right text-amber-50 shadow-2xl shadow-black/30 backdrop-blur-md"
     >
-      <div class="flex items-center justify-between">
-        <span class="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80"
-          >Rain</span
-        >
-        <button id="rainBtn" class="toggle" aria-pressed="false" aria-label="Toggle rain"></button>
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">score</div>
+        <div id="hudScore" class="font-display text-3xl font-semibold tabular-nums leading-tight">0</div>
+        <div class="text-[11px] tracking-wide text-amber-100/50">
+          best <span id="hudHigh" class="tabular-nums text-amber-100/80">0</span>
+        </div>
       </div>
 
-      <div class="flex items-center justify-between">
-        <span class="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80"
-          >Sound</span
-        >
-        <button id="soundBtn" class="toggle" aria-pressed="true" aria-label="Toggle sound"></button>
+      <div class="flex items-end justify-between border-t border-white/10 pt-2.5">
+        <div class="text-left">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">combo</div>
+          <div id="hudCombo" class="font-display text-2xl font-semibold tabular-nums leading-tight">0</div>
+        </div>
+        <div id="hudMult" class="rounded-md bg-white/10 px-2 py-0.5 text-[13px] font-bold tabular-nums text-amber-200">
+          ×1
+        </div>
       </div>
 
-      <label class="block">
-        <span
-          class="mb-1.5 flex justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80"
-          ><span>Water</span><span class="normal-case tracking-normal text-amber-100/50">calm ↔ lively</span></span
-        >
-        <input id="dampSlider" type="range" min="0" max="100" value="72" class="slider" />
-      </label>
-
-      <label class="block">
-        <span
-          class="mb-1.5 flex justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100/80"
-          ><span>Splash</span><span class="normal-case tracking-normal text-amber-100/50">gentle ↔ mighty</span></span
-        >
-        <input id="powerSlider" type="range" min="0" max="100" value="50" class="slider" />
-      </label>
-
-      <button
-        id="resetBtn"
-        class="w-full rounded-lg border border-white/10 bg-white/10 py-1.5 text-[13px] tracking-wide text-amber-50/90 transition-colors hover:bg-white/20 active:bg-white/25"
-      >
-        still the water
-      </button>
+      <div class="border-t border-white/10 pt-2.5">
+        <div class="mb-1.5 flex items-center justify-between">
+          <span class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">chaos</span>
+          <span id="hudChaosPct" class="text-[11px] tabular-nums text-amber-100/60">0%</span>
+        </div>
+        <div class="h-2 overflow-hidden rounded-full bg-white/10">
+          <div id="hudChaos" class="chaos-fill h-full w-0 rounded-full"></div>
+        </div>
+      </div>
     </aside>
+
+    <button
+      id="soundBtn"
+      class="toggle fixed bottom-5 right-5"
+      aria-pressed="true"
+      aria-label="Toggle sound"
+      title="sound"
+    ></button>
 
   </body>
 </html>

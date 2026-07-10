@@ -17,10 +17,10 @@ export class WaveField {
   private next: Float32Array;
   private readonly sponge: Float32Array;
 
-  /** per-step global energy loss; user-tunable (calm ↔ lively) */
-  damping = 0.9962;
-  /** c² — wave speed squared, must stay ≤ 0.5 for numerical stability */
-  private readonly c2 = 0.32;
+  /** per-step global energy loss; chaos-driven (calm ↔ stormy) */
+  damping = 0.9945;
+  /** c² — wave speed squared; chaos raises it. Kept ≤ 0.45 for stability. */
+  c2 = 0.28;
 
   constructor(w: number, h: number) {
     this.w = w;
