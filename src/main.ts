@@ -158,7 +158,11 @@ function judgeLanding(pos: { x: number; y: number }, power: number): void {
   const res = game.judge(music.time());
   const style = JUDGE_STYLE[res.judgment];
   const label =
-    res.judgment === "miss" ? style.text : res.combo > 1 ? `${style.text} ×${res.combo}` : style.text;
+    res.judgment === "miss"
+      ? style.text
+      : res.combo > 1
+        ? `${style.text} ×${res.combo}`
+        : style.text;
   texts.push({ x: pos.x, y: pos.y - 34, text: label, color: style.color, t: 0 });
 
   music.land(res.judgment, res.tier);

@@ -13,7 +13,10 @@
     <canvas id="pond" class="fixed inset-0 h-full w-full"></canvas>
 
     <!-- combo-tier screen-edge glow -->
-    <div id="glow" class="pointer-events-none fixed inset-0 transition-[box-shadow,opacity] duration-700"></div>
+    <div
+      id="glow"
+      class="pointer-events-none fixed inset-0 transition-[box-shadow,opacity] duration-700"
+    ></div>
 
     <header class="pointer-events-none fixed left-6 top-5 select-none">
       <h1
@@ -23,9 +26,8 @@
       </h1>
       <p class="mt-0.5 text-[12px] tracking-[0.22em] uppercase text-amber-100/55">rhythm chaos</p>
       <p class="mt-3 max-w-[240px] text-[13px] leading-snug tracking-wide text-amber-100/60">
-        hop pad to pad — <span class="text-amber-50/90">land on the pulse</span>.
-        on-beat landings build your combo and stir the storm; one slip and the
-        pond exhales back to glass.
+        hop pad to pad — <span class="text-amber-50/90">land on the pulse</span>. on-beat landings
+        build your combo and stir the storm; one slip and the pond exhales back to glass.
       </p>
     </header>
 
@@ -34,8 +36,12 @@
       class="pointer-events-none fixed right-5 top-5 w-56 select-none space-y-3 rounded-2xl border border-white/12 bg-[#141228]/45 p-4 text-right text-amber-50 shadow-2xl shadow-black/30 backdrop-blur-md"
     >
       <div>
-        <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">score</div>
-        <div id="hudScore" class="font-display text-3xl font-semibold tabular-nums leading-tight">0</div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">
+          score
+        </div>
+        <div id="hudScore" class="font-display text-3xl font-semibold tabular-nums leading-tight">
+          0
+        </div>
         <div class="text-[11px] tracking-wide text-amber-100/50">
           best <span id="hudHigh" class="tabular-nums text-amber-100/80">0</span>
         </div>
@@ -43,17 +49,26 @@
 
       <div class="flex items-end justify-between border-t border-white/10 pt-2.5">
         <div class="text-left">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">combo</div>
-          <div id="hudCombo" class="font-display text-2xl font-semibold tabular-nums leading-tight">0</div>
+          <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">
+            combo
+          </div>
+          <div id="hudCombo" class="font-display text-2xl font-semibold tabular-nums leading-tight">
+            0
+          </div>
         </div>
-        <div id="hudMult" class="rounded-md bg-white/10 px-2 py-0.5 text-[13px] font-bold tabular-nums text-amber-200">
+        <div
+          id="hudMult"
+          class="rounded-md bg-white/10 px-2 py-0.5 text-[13px] font-bold tabular-nums text-amber-200"
+        >
           ×1
         </div>
       </div>
 
       <div class="border-t border-white/10 pt-2.5">
         <div class="mb-1.5 flex items-center justify-between">
-          <span class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60">chaos</span>
+          <span class="text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-100/60"
+            >chaos</span
+          >
           <span id="hudChaosPct" class="text-[11px] tabular-nums text-amber-100/60">0%</span>
         </div>
         <div class="h-2 overflow-hidden rounded-full bg-white/10">

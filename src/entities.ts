@@ -48,14 +48,7 @@ export class LilyPad {
     this.vel = { x: 0, y: 0 };
   }
 
-  update(
-    dt: number,
-    t: number,
-    field: WaveField,
-    toCell: number,
-    chaos: number,
-    wind: Vec,
-  ): void {
+  update(dt: number, t: number, field: WaveField, toCell: number, chaos: number, wind: Vec): void {
     const cx = this.pos.x * toCell;
     const cy = this.pos.y * toCell;
     const hgt = field.sample(cx, cy);
@@ -79,8 +72,10 @@ export class LilyPad {
     const SPRING = 2.6;
     const DRAG = 2.0;
     const gust = 26 * chaos * chaos;
-    this.vel.x += (-gx * PUSH + wind.x * gust - (this.pos.x - wx) * SPRING - this.vel.x * DRAG) * dt;
-    this.vel.y += (-gy * PUSH + wind.y * gust - (this.pos.y - wy) * SPRING - this.vel.y * DRAG) * dt;
+    this.vel.x +=
+      (-gx * PUSH + wind.x * gust - (this.pos.x - wx) * SPRING - this.vel.x * DRAG) * dt;
+    this.vel.y +=
+      (-gy * PUSH + wind.y * gust - (this.pos.y - wy) * SPRING - this.vel.y * DRAG) * dt;
     this.pos.x += this.vel.x * dt;
     this.pos.y += this.vel.y * dt;
   }
